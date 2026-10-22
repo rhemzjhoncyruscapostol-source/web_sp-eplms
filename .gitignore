@@ -1,0 +1,64 @@
+# macOS
+.DS_Store
+
+# Environment
+.env
+!.env.example
+
+# Dependencies
+vendor/
+app/vendor/
+composer.lock
+
+# Cache & Logs
+runtime/*
+!runtime/.htaccess
+!runtime/index.html
+*.log
+*.cache
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# OS
+Thumbs.db
+
+
+# Dependencies
+vendor/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+storage/logs/
+
+# Cache
+storage/cache/
+storage/framework/cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Composer
+composer.phar
+composer.lock
+runtime/outbox.log
+runtime/uploads/
