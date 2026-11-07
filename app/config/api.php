@@ -96,7 +96,10 @@ $config['refresh_token_key'] = getenv('REFRESH_TOKEN_KEY') ?: '';
 | already deployed.
 |
 */
-$allowed_origins = array_filter(array_map('trim', explode(',', getenv('ALLOW_ORIGIN') ?: 'http://localhost:5173')));
+$default_origin = (getenv('APP_ENV') ?: 'development') === 'production'
+    ? 'https://web-frontend-sp-eplms.vercel.app'
+    : 'http://localhost:5173';
+$allowed_origins = array_filter(array_map('trim', explode(',', getenv('ALLOW_ORIGIN') ?: $default_origin)));
 $config['allow_origin'] = count($allowed_origins) === 1 && $allowed_origins[0] === '*' ? '*' : array_values($allowed_origins);
 
 /*
