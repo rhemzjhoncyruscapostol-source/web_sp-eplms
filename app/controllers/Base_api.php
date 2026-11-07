@@ -232,6 +232,8 @@ class Base_api extends Controller
                     $mailer->Host = $host;
                     $mailer->Port = (int) (getenv('MAIL_PORT') ?: 587);
                     $mailer->SMTPAuth = true;
+                    $mailer->Timeout = 10;
+                    $mailer->getSMTPInstance()->Timelimit = 15;
                     $mailer->Username = $username;
                     $mailer->Password = $password;
                     $mailer->SMTPSecure = $encryption === 'ssl'
