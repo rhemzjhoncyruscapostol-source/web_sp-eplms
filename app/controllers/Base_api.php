@@ -195,7 +195,7 @@ class Base_api extends Controller
 
     /**
      * Always appends to runtime/outbox.log (handy in development). Real delivery
-     * is opt-in: MAIL_ENABLED=true sends through SMTP when configured, otherwise PHP mail().
+     * is opt-in: MAIL_ENABLED=true uses a configured Gmail API, Resend, SMTP, or PHP mail provider.
      */
     protected function deliver($email, $phone, string $title, string $body): bool
     {
@@ -214,8 +214,33 @@ class Base_api extends Controller
         $emailSent = false;
         if (getenv('MAIL_ENABLED') === 'true' && $email) {
             try {
-                $resendApiKey = trim((string) getenv('RESEND_API_KEY'));
-                if ($resendApiKey !== '') {
+                $gmailSettings = [
+                    trim((string) getenv('GMAIL_CLIENT_ID')),
+                    trim((string) getenv('GMAIL_CLIENT_SECRET')),
+                    trim((string) getenv('GMAIL_REFRESH_TOKEN')),
+                    trim((string) getenv('GMAIL_SENDER')),
+                ];
+                $gmailConfigured = count(array_filter($gmailSettings, static function ($value): bool {
+                    return $value !== '';
+                })) > 0;
+
+                if ($gmailConfigured) {
+                    if (in_array('', $gmailSettings, true)) {
+                        throw new RuntimeException('Gmail API configuration is incomplete.');
+                    }
+                    $this->sendWithGmailApi(
+                        (string) $email,
+                        $title,
+                        $body,
+                        $gmailSettings[0],
+                        $gmailSettings[1],
+                        $gmailSettings[2],
+                        $gmailSettings[3]
+                    );
+                    $emailSent = true;
+                } else {
+                    $resendApiKey = trim((string) getenv('RESEND_API_KEY'));
+                    if ($resendApiKey !== '') {
                     $from = trim((string) (getenv('MAIL_FROM') ?: ''));
                     if ($from === '') {
                         throw new RuntimeException('MAIL_FROM is required when using Resend.');
@@ -242,48 +267,49 @@ class Base_api extends Controller
                     } else {
                         $emailSent = true;
                     }
-                } else {
-                    $host = trim((string) getenv('MAIL_HOST'));
-                    if ($host !== '') {
-                        $username = (string) getenv('MAIL_USERNAME');
-                        $password = (string) getenv('MAIL_PASSWORD');
-                        if ($username === '' || $password === '') {
-                            throw new RuntimeException('SMTP username and password are required.');
-                        }
-
-                        $encryption = strtolower((string) (getenv('MAIL_ENCRYPTION') ?: 'tls'));
-                        if (!in_array($encryption, ['tls', 'ssl'], true)) {
-                            throw new RuntimeException('MAIL_ENCRYPTION must be tls or ssl.');
-                        }
-
-                        $mailer = new \PHPMailer\PHPMailer\PHPMailer(true);
-                        $mailer->isSMTP();
-                        $mailer->Host = $host;
-                        $mailer->Port = (int) (getenv('MAIL_PORT') ?: 587);
-                        $mailer->SMTPAuth = true;
-                        $mailer->Timeout = 10;
-                        $mailer->getSMTPInstance()->Timelimit = 15;
-                        $mailer->Username = $username;
-                        $mailer->Password = $password;
-                        $mailer->SMTPSecure = $encryption === 'ssl'
-                            ? \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS
-                            : \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
-                        $mailer->CharSet = \PHPMailer\PHPMailer\PHPMailer::CHARSET_UTF8;
-                        $mailer->setFrom(
-                            (string) (getenv('MAIL_FROM') ?: $username),
-                            (string) (getenv('MAIL_FROM_NAME') ?: 'SP-EPLMS')
-                        );
-                        $mailer->addAddress($email);
-                        $mailer->Subject = $title;
-                        $mailer->Body = $body;
-                        $mailer->send();
-                        $emailSent = true;
                     } else {
-                        $from = (string) (getenv('MAIL_FROM') ?: 'no-reply@localhost');
-                        if (!mail($email, $title, $body, 'From: ' . $from)) {
-                            throw new RuntimeException('PHP mail() returned false.');
+                        $host = trim((string) getenv('MAIL_HOST'));
+                        if ($host !== '') {
+                            $username = (string) getenv('MAIL_USERNAME');
+                            $password = (string) getenv('MAIL_PASSWORD');
+                            if ($username === '' || $password === '') {
+                                throw new RuntimeException('SMTP username and password are required.');
+                            }
+
+                            $encryption = strtolower((string) (getenv('MAIL_ENCRYPTION') ?: 'tls'));
+                            if (!in_array($encryption, ['tls', 'ssl'], true)) {
+                                throw new RuntimeException('MAIL_ENCRYPTION must be tls or ssl.');
+                            }
+
+                            $mailer = new \PHPMailer\PHPMailer\PHPMailer(true);
+                            $mailer->isSMTP();
+                            $mailer->Host = $host;
+                            $mailer->Port = (int) (getenv('MAIL_PORT') ?: 587);
+                            $mailer->SMTPAuth = true;
+                            $mailer->Timeout = 10;
+                            $mailer->getSMTPInstance()->Timelimit = 15;
+                            $mailer->Username = $username;
+                            $mailer->Password = $password;
+                            $mailer->SMTPSecure = $encryption === 'ssl'
+                                ? \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS
+                                : \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+                            $mailer->CharSet = \PHPMailer\PHPMailer\PHPMailer::CHARSET_UTF8;
+                            $mailer->setFrom(
+                                (string) (getenv('MAIL_FROM') ?: $username),
+                                (string) (getenv('MAIL_FROM_NAME') ?: 'SP-EPLMS')
+                            );
+                            $mailer->addAddress($email);
+                            $mailer->Subject = $title;
+                            $mailer->Body = $body;
+                            $mailer->send();
+                            $emailSent = true;
+                        } else {
+                            $from = (string) (getenv('MAIL_FROM') ?: 'no-reply@localhost');
+                            if (!mail($email, $title, $body, 'From: ' . $from)) {
+                                throw new RuntimeException('PHP mail() returned false.');
+                            }
+                            $emailSent = true;
                         }
-                        $emailSent = true;
                     }
                 }
             } catch (Throwable $e) {
@@ -302,6 +328,55 @@ class Base_api extends Controller
             @file_get_contents($hook, false, $ctx);
         }
         return $emailSent;
+    }
+
+    private function sendWithGmailApi(
+        string $recipient,
+        string $subject,
+        string $body,
+        string $clientId,
+        string $clientSecret,
+        string $refreshToken,
+        string $sender
+    ): void {
+        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL) || !filter_var($sender, FILTER_VALIDATE_EMAIL)) {
+            throw new RuntimeException('Gmail API sender or recipient address is invalid.');
+        }
+
+        $client = new \Google\Client();
+        $client->setApplicationName('SP-EPLMS');
+        $client->setClientId($clientId);
+        $client->setClientSecret($clientSecret);
+        $client->setScopes([\Google\Service\Gmail::GMAIL_SEND]);
+        $client->setAccessType('offline');
+
+        $token = $client->fetchAccessTokenWithRefreshToken($refreshToken);
+        if (!is_array($token) || empty($token['access_token'])) {
+            $status = isset($token['error']) ? ' with OAuth error ' . preg_replace('/[^a-z_]/i', '', (string) $token['error']) : '';
+            throw new RuntimeException('Gmail OAuth token refresh failed' . $status . '.');
+        }
+        $client->setAccessToken($token);
+
+        $senderName = str_replace(["\r", "\n"], '', (string) (getenv('MAIL_FROM_NAME') ?: 'SP-EPLMS'));
+        $encodedSender = '=?UTF-8?B?' . base64_encode($senderName) . '?=';
+        $encodedSubject = '=?UTF-8?B?' . base64_encode(str_replace(["\r", "\n"], '', $subject)) . '?=';
+        $mimeMessage = "From: {$encodedSender} <{$sender}>\r\n"
+            . "To: {$recipient}\r\n"
+            . "Subject: {$encodedSubject}\r\n"
+            . "MIME-Version: 1.0\r\n"
+            . "Content-Type: text/plain; charset=UTF-8\r\n"
+            . "Content-Transfer-Encoding: base64\r\n\r\n"
+            . rtrim(chunk_split(base64_encode($body), 76, "\r\n"));
+
+        $message = new \Google\Service\Gmail\Message();
+        $message->setRaw(rtrim(strtr(base64_encode($mimeMessage), '+/', '-_'), '='));
+
+        try {
+            $service = new \Google\Service\Gmail($client);
+            $service->users_messages->send('me', $message);
+        } catch (\Google\Service\Exception $e) {
+            throw new RuntimeException('Gmail API rejected the email (HTTP ' . $e->getCode() . ').');
+        }
     }
 
     protected function setting(string $key, $default = null)
