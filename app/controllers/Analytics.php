@@ -12,7 +12,7 @@ class Analytics extends Base_api
         $this->analytics = $this->call->model('Analytics_model', 'analytics');
     }
 
-    /** GET /api/analytics//hr  (hr, mis, admin) */
+    /** GET /api/analytics//hr   (hr, mis, admin) */
     public function hr()
     {
         $this->api->require_method('GET');
