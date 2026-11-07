@@ -4,7 +4,7 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 # Install the PHP extensions used by the API.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libonig-dev \
+    && apt-get install -y --no-install-recommends libonig-dev unzip \
     && docker-php-ext-install pdo pdo_mysql mbstring \
     && apt-get purge -y --auto-remove libonig-dev \
     && apt-get install -y --no-install-recommends libonig5 \
