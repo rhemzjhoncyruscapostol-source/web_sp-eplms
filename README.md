@@ -13,4 +13,4 @@ Controllers handle HTTP requests, validation, authorization, and responses. Data
 
 Built on LavaLust 4.6 (the framework code in `scheme/` is unchanged).
 
-For production Gmail OTP delivery, set `MAIL_ENABLED=true`, `MAIL_HOST=smtp.gmail.com`, `MAIL_PORT=587`, `MAIL_ENCRYPTION=tls`, and `MAIL_USERNAME` to the sending Gmail address. Set `MAIL_FROM` to that same address and store a Google App Password in `MAIL_PASSWORD` using the host's secret environment settings. Do not use the normal Gmail password. The Docker image installs Composer dependencies from `composer.lock`.
+Render free web services block outbound SMTP. For OTP delivery on Render, use Resend's HTTPS API: set `MAIL_ENABLED=true`, `RESEND_API_KEY` to a Resend API key, and `MAIL_FROM` to a sender address verified in Resend. Store the API key in the host's secret environment settings. SMTP settings remain available for hosts that permit SMTP; do not use a normal Gmail password. The Docker image installs Composer dependencies from `composer.lock`.

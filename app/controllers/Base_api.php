@@ -214,47 +214,78 @@ class Base_api extends Controller
         $emailSent = false;
         if (getenv('MAIL_ENABLED') === 'true' && $email) {
             try {
-                $host = trim((string) getenv('MAIL_HOST'));
-                if ($host !== '') {
-                    $username = (string) getenv('MAIL_USERNAME');
-                    $password = (string) getenv('MAIL_PASSWORD');
-                    if ($username === '' || $password === '') {
-                        throw new RuntimeException('SMTP username and password are required.');
+                $resendApiKey = trim((string) getenv('RESEND_API_KEY'));
+                if ($resendApiKey !== '') {
+                    $from = trim((string) (getenv('MAIL_FROM') ?: ''));
+                    if ($from === '') {
+                        throw new RuntimeException('MAIL_FROM is required when using Resend.');
                     }
-
-                    $encryption = strtolower((string) (getenv('MAIL_ENCRYPTION') ?: 'tls'));
-                    if (!in_array($encryption, ['tls', 'ssl'], true)) {
-                        throw new RuntimeException('MAIL_ENCRYPTION must be tls or ssl.');
+                    $fromName = trim((string) (getenv('MAIL_FROM_NAME') ?: 'SP-EPLMS'));
+                    $payload = json_encode([
+                        'from' => $fromName . ' <' . $from . '>',
+                        'to' => [$email],
+                        'subject' => $title,
+                        'text' => $body,
+                    ], JSON_THROW_ON_ERROR);
+                    $context = stream_context_create(['http' => [
+                        'method' => 'POST',
+                        'header' => "Authorization: Bearer $resendApiKey\r\nContent-Type: application/json\r\n",
+                        'content' => $payload,
+                        'timeout' => 15,
+                        'ignore_errors' => true,
+                    ]]);
+                    $response = file_get_contents('https://api.resend.com/emails', false, $context);
+                    $statusLine = $http_response_header[0] ?? '';
+                    if ($response === false || !preg_match('/\s2\d{2}\s/', $statusLine)) {
+                        preg_match('/\s(\d{3})\s/', $statusLine, $status);
+                        error_log('Resend email delivery failed with HTTP ' . ($status[1] ?? 'request error') . '.');
+                    } else {
+                        $emailSent = true;
                     }
-
-                    $mailer = new \PHPMailer\PHPMailer\PHPMailer(true);
-                    $mailer->isSMTP();
-                    $mailer->Host = $host;
-                    $mailer->Port = (int) (getenv('MAIL_PORT') ?: 587);
-                    $mailer->SMTPAuth = true;
-                    $mailer->Timeout = 10;
-                    $mailer->getSMTPInstance()->Timelimit = 15;
-                    $mailer->Username = $username;
-                    $mailer->Password = $password;
-                    $mailer->SMTPSecure = $encryption === 'ssl'
-                        ? \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS
-                        : \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
-                    $mailer->CharSet = \PHPMailer\PHPMailer\PHPMailer::CHARSET_UTF8;
-                    $mailer->setFrom(
-                        (string) (getenv('MAIL_FROM') ?: $username),
-                        (string) (getenv('MAIL_FROM_NAME') ?: 'SP-EPLMS')
-                    );
-                    $mailer->addAddress($email);
-                    $mailer->Subject = $title;
-                    $mailer->Body = $body;
-                    $mailer->send();
                 } else {
-                    $from = (string) (getenv('MAIL_FROM') ?: 'no-reply@localhost');
-                    if (!mail($email, $title, $body, 'From: ' . $from)) {
-                        throw new RuntimeException('PHP mail() returned false.');
+                    $host = trim((string) getenv('MAIL_HOST'));
+                    if ($host !== '') {
+                        $username = (string) getenv('MAIL_USERNAME');
+                        $password = (string) getenv('MAIL_PASSWORD');
+                        if ($username === '' || $password === '') {
+                            throw new RuntimeException('SMTP username and password are required.');
+                        }
+
+                        $encryption = strtolower((string) (getenv('MAIL_ENCRYPTION') ?: 'tls'));
+                        if (!in_array($encryption, ['tls', 'ssl'], true)) {
+                            throw new RuntimeException('MAIL_ENCRYPTION must be tls or ssl.');
+                        }
+
+                        $mailer = new \PHPMailer\PHPMailer\PHPMailer(true);
+                        $mailer->isSMTP();
+                        $mailer->Host = $host;
+                        $mailer->Port = (int) (getenv('MAIL_PORT') ?: 587);
+                        $mailer->SMTPAuth = true;
+                        $mailer->Timeout = 10;
+                        $mailer->getSMTPInstance()->Timelimit = 15;
+                        $mailer->Username = $username;
+                        $mailer->Password = $password;
+                        $mailer->SMTPSecure = $encryption === 'ssl'
+                            ? \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS
+                            : \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+                        $mailer->CharSet = \PHPMailer\PHPMailer\PHPMailer::CHARSET_UTF8;
+                        $mailer->setFrom(
+                            (string) (getenv('MAIL_FROM') ?: $username),
+                            (string) (getenv('MAIL_FROM_NAME') ?: 'SP-EPLMS')
+                        );
+                        $mailer->addAddress($email);
+                        $mailer->Subject = $title;
+                        $mailer->Body = $body;
+                        $mailer->send();
+                        $emailSent = true;
+                    } else {
+                        $from = (string) (getenv('MAIL_FROM') ?: 'no-reply@localhost');
+                        if (!mail($email, $title, $body, 'From: ' . $from)) {
+                            throw new RuntimeException('PHP mail() returned false.');
+                        }
+                        $emailSent = true;
                     }
                 }
-                $emailSent = true;
             } catch (Throwable $e) {
                 error_log('Email delivery failed: ' . $e->getMessage());
             }
