@@ -28,7 +28,7 @@ class Attendance extends Base_api
         $this->ok(['date' => $date, 'records' => $rows]);
     }
 
-    /** GET /api/me/attendance- the authenticated employee's recent punches. */
+    /** GET /api/me/attendance - the authenticated employee's recent punches. */
     public function mine()
     {
         $this->api->require_method('GET');
