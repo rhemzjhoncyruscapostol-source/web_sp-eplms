@@ -195,21 +195,69 @@ class Base_api extends Controller
 
     /**
      * Always appends to runtime/outbox.log (handy in development). Real delivery
-     * is opt-in: MAIL_ENABLED=true uses PHP mail(); SMS_WEBHOOK_URL posts JSON to your SMS gateway.
+     * is opt-in: MAIL_ENABLED=true sends through SMTP when configured, otherwise PHP mail().
      */
-    protected function deliver($email, $phone, string $title, string $body): void
+    protected function deliver($email, $phone, string $title, string $body): bool
     {
         $dir = ROOT_DIR . 'runtime';
         if (is_dir($dir) || @mkdir($dir, 0775, true)) {
+            $loggedBody = $title === 'Your sign-in code' && getenv('APP_ENV') === 'production'
+                ? '[sign-in code redacted]'
+                : $body;
             @file_put_contents(
                 $dir . '/outbox.log',
-                sprintf("[%s] email=%s phone=%s | %s | %s\n", date('c'), $email ?: '-', $phone ?: '-', $title, $body),
+                sprintf("[%s] email=%s phone=%s | %s | %s\n", date('c'), $email ?: '-', $phone ?: '-', $title, $loggedBody),
                 FILE_APPEND | LOCK_EX
             );
         }
+
+        $emailSent = false;
         if (getenv('MAIL_ENABLED') === 'true' && $email) {
-            @mail($email, $title, $body, 'From: ' . (getenv('MAIL_FROM') ?: 'no-reply@localhost'));
+            try {
+                $host = trim((string) getenv('MAIL_HOST'));
+                if ($host !== '') {
+                    $username = (string) getenv('MAIL_USERNAME');
+                    $password = (string) getenv('MAIL_PASSWORD');
+                    if ($username === '' || $password === '') {
+                        throw new RuntimeException('SMTP username and password are required.');
+                    }
+
+                    $encryption = strtolower((string) (getenv('MAIL_ENCRYPTION') ?: 'tls'));
+                    if (!in_array($encryption, ['tls', 'ssl'], true)) {
+                        throw new RuntimeException('MAIL_ENCRYPTION must be tls or ssl.');
+                    }
+
+                    $mailer = new \PHPMailer\PHPMailer\PHPMailer(true);
+                    $mailer->isSMTP();
+                    $mailer->Host = $host;
+                    $mailer->Port = (int) (getenv('MAIL_PORT') ?: 587);
+                    $mailer->SMTPAuth = true;
+                    $mailer->Username = $username;
+                    $mailer->Password = $password;
+                    $mailer->SMTPSecure = $encryption === 'ssl'
+                        ? \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS
+                        : \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+                    $mailer->CharSet = \PHPMailer\PHPMailer\PHPMailer::CHARSET_UTF8;
+                    $mailer->setFrom(
+                        (string) (getenv('MAIL_FROM') ?: $username),
+                        (string) (getenv('MAIL_FROM_NAME') ?: 'SP-EPLMS')
+                    );
+                    $mailer->addAddress($email);
+                    $mailer->Subject = $title;
+                    $mailer->Body = $body;
+                    $mailer->send();
+                } else {
+                    $from = (string) (getenv('MAIL_FROM') ?: 'no-reply@localhost');
+                    if (!mail($email, $title, $body, 'From: ' . $from)) {
+                        throw new RuntimeException('PHP mail() returned false.');
+                    }
+                }
+                $emailSent = true;
+            } catch (Throwable $e) {
+                error_log('Email delivery failed: ' . $e->getMessage());
+            }
         }
+
         $hook = getenv('SMS_WEBHOOK_URL');
         if ($hook && $phone) {
             $ctx = stream_context_create(['http' => [
@@ -220,6 +268,7 @@ class Base_api extends Controller
             ]]);
             @file_get_contents($hook, false, $ctx);
         }
+        return $emailSent;
     }
 
     protected function setting(string $key, $default = null)

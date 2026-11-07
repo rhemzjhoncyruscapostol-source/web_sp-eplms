@@ -116,7 +116,10 @@ class Auth extends Base_api
                     expires_at = DATE_ADD(NOW(), INTERVAL 5 MINUTE) WHERE id = ?',
             [$this->code_hash($code), (int) $row['id']]
         );
-        $this->send_code($user, $code);
+        if (!$this->send_code($user, $code)) {
+            $this->run('UPDATE otp_challenges SET used = 1 WHERE id = ?', [(int) $row['id']]);
+            $this->fail('We could not send your sign-in code. Please contact MIS or try again later.', 503);
+        }
         $out = ['message' => 'A new code was sent.'];
         if (getenv('APP_ENV') === 'development') {
             $out['dev_code'] = $code;
@@ -190,7 +193,13 @@ class Auth extends Base_api
              VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))',
             [(int) $user['id'], hash('sha256', $challenge), $this->code_hash($code)]
         );
-        $this->send_code($user, $code);
+        if (!$this->send_code($user, $code)) {
+            $this->run(
+                'UPDATE otp_challenges SET used = 1 WHERE challenge_hash = ?',
+                [hash('sha256', $challenge)]
+            );
+            $this->fail('We could not send your sign-in code. Please contact MIS or try again later.', 503);
+        }
 
         $out = [
             'otp_required' => true,
@@ -205,10 +214,19 @@ class Auth extends Base_api
         $this->ok($out);
     }
 
-    private function send_code(array $user, string $code): void
+    private function send_code(array $user, string $code): bool
     {
         // Deliberately not stored as an in-app notification.
-        $this->deliver($user['email'], $user['phone'] ?? null, 'Your sign-in code', "Your SP-EPLMS sign-in code is $code. It expires in 5 minutes. Never share it.");
+        $sent = $this->deliver(
+            $user['email'],
+            $user['phone'] ?? null,
+            'Your sign-in code',
+            "Your SP-EPLMS sign-in code is $code. It expires in 5 minutes. Never share it."
+        );
+        if (!$sent && getenv('APP_ENV') === 'production' && getenv('MAIL_ENABLED') !== 'true') {
+            error_log('OTP delivery failed: MAIL_ENABLED is not true.');
+        }
+        return $sent || getenv('APP_ENV') === 'development';
     }
 
     private function new_code(): string

@@ -1,5 +1,6 @@
 ARG PHP_VERSION=8.4
 FROM php:${PHP_VERSION}-apache
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 # Install the PHP extensions used by the API.
 RUN apt-get update \
@@ -8,6 +9,10 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove libonig-dev \
     && apt-get install -y --no-install-recommends libonig5 \
     && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /var/www/html
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-interaction --no-progress --prefer-dist --classmap-authoritative
 
 # Enable Apache mod_rewrite
 RUN a2enmod rewrite
