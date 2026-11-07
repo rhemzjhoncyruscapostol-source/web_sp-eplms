@@ -88,7 +88,7 @@ class Expenses extends Base_api
     {
         $this->api->require_method('POST');
         $me = $this->authenticate(['accounting']);
-        $in = $this->json_body();
+        $in = $this->api->body();
 
         $errors = [];
         $date = $this->text($in['expense_date'] ?? '', 10);
@@ -164,7 +164,7 @@ class Expenses extends Base_api
     {
         $this->api->require_method('PUT');
         $this->authenticate(['accounting']);
-        $in = $this->json_body();
+        $in = $this->api->body();
 
         $office = $this->text($in['office'] ?? '', 120);
         $year = (int) ($in['fiscal_year'] ?? 0);

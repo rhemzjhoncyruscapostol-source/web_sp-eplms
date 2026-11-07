@@ -24,7 +24,8 @@ class Stats_model extends Api_model
     public function on_leave_today(): int
     {
         return (int) $this->scalar(
-            "SELECT COUNT(*) FROM leave_requests WHERE status = 'approved' AND CURDATE() BETWEEN start_date AND end_date"
+            "SELECT COUNT(*) FROM leave_requests WHERE status = 'approved' AND leave_type <> 'travel'
+              AND CURDATE() BETWEEN start_date AND end_date"
         );
     }
 

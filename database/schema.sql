@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) NOT NULL,
   phone VARCHAR(30) NULL DEFAULT NULL,
   password VARCHAR(255) NOT NULL,
-  role ENUM('admin','hr','employee','mis','accounting') NOT NULL DEFAULT 'employee',
+  role ENUM('admin','hr','employee','mis','accounting','attendance_operator') NOT NULL DEFAULT 'employee',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NULL DEFAULT NULL,
@@ -31,9 +31,12 @@ CREATE TABLE IF NOT EXISTS employees (
   full_name VARCHAR(150) NOT NULL,
   job_title VARCHAR(120) NOT NULL,
   department VARCHAR(120) NULL DEFAULT NULL,
+  monthly_salary DECIMAL(12,2) NOT NULL DEFAULT 0,
   reports_to INT UNSIGNED NULL DEFAULT NULL,
   date_hired DATE NULL DEFAULT NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  include_in_chart TINYINT(1) NOT NULL DEFAULT 1,
+  qr_token CHAR(64) NULL DEFAULT NULL UNIQUE,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NULL DEFAULT NULL,
   PRIMARY KEY (id),
@@ -42,6 +45,18 @@ CREATE TABLE IF NOT EXISTS employees (
   KEY reports_to_idx (reports_to),
   CONSTRAINT fk_emp_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL,
   CONSTRAINT fk_emp_boss FOREIGN KEY (reports_to) REFERENCES employees (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS employee_salary_history (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  employee_id INT UNSIGNED NOT NULL,
+  monthly_salary DECIMAL(12,2) NOT NULL,
+  effective_from DATE NOT NULL,
+  created_by INT UNSIGNED NULL DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY employee_salary_history_idx (employee_id, effective_from),
+  CONSTRAINT fk_salary_history_emp FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS salaries (
@@ -53,6 +68,8 @@ CREATE TABLE IF NOT EXISTS salaries (
   taxable_benefits DECIMAL(12,2) NOT NULL DEFAULT 0,
   non_taxable_benefits DECIMAL(12,2) NOT NULL DEFAULT 0,
   deductions DECIMAL(12,2) NOT NULL DEFAULT 0,
+  absence_days SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  absence_deduction DECIMAL(12,2) NOT NULL DEFAULT 0,
   sss DECIMAL(12,2) NOT NULL DEFAULT 0,
   philhealth DECIMAL(12,2) NOT NULL DEFAULT 0,
   pagibig DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -70,7 +87,7 @@ CREATE TABLE IF NOT EXISTS salaries (
 CREATE TABLE IF NOT EXISTS leave_requests (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   employee_id INT UNSIGNED NOT NULL,
-  leave_type ENUM('vacation','sick','special','maternity','paternity','unpaid') NOT NULL,
+  leave_type ENUM('vacation','sick','special','maternity','paternity','unpaid','travel') NOT NULL,
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
   days INT UNSIGNED NOT NULL DEFAULT 1,
@@ -102,9 +119,11 @@ CREATE TABLE IF NOT EXISTS attendance (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   employee_id INT UNSIGNED NOT NULL,
   work_date DATE NOT NULL,
-  status ENUM('present','late','absent','on_leave') NOT NULL,
+  status ENUM('present','late','absent','on_leave','travel') NOT NULL,
   time_in DATETIME NULL DEFAULT NULL,
   time_out DATETIME NULL DEFAULT NULL,
+  time_in_2 DATETIME NULL DEFAULT NULL,
+  time_out_2 DATETIME NULL DEFAULT NULL,
   remarks VARCHAR(255) NULL DEFAULT NULL,
   recorded_by INT UNSIGNED NULL DEFAULT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -158,6 +177,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   user_id INT UNSIGNED NOT NULL,
   title VARCHAR(150) NOT NULL,
   body VARCHAR(500) NOT NULL,
+  action_url VARCHAR(255) NULL DEFAULT NULL,
   is_read TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

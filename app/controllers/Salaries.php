@@ -21,7 +21,7 @@ class Salaries extends Base_api
 
         $rows = $this->rows(
             'SELECT id, period, basic, allowances, taxable_benefits, non_taxable_benefits,
-                    deductions, sss, philhealth, pagibig, withholding_tax, net, remarks
+                    deductions, absence_days, absence_deduction, sss, philhealth, pagibig, withholding_tax, net, remarks
                FROM salaries WHERE employee_id = ? ORDER BY period DESC',
             [$emp]
         );
@@ -45,7 +45,8 @@ class Salaries extends Base_api
 
         $rows = $this->rows(
             "SELECT s.id, s.employee_id, s.period, s.basic, s.allowances, s.taxable_benefits,
-                    s.non_taxable_benefits, s.deductions, s.sss, s.philhealth, s.pagibig,
+                    s.non_taxable_benefits, s.deductions, s.absence_days, s.absence_deduction,
+                    s.sss, s.philhealth, s.pagibig,
                     s.withholding_tax, s.net, s.remarks,
                     e.full_name, e.job_title, e.department
                FROM salaries s JOIN employees e ON e.id = s.employee_id
@@ -62,7 +63,7 @@ class Salaries extends Base_api
     {
         $this->api->require_method('POST');
         $me = $this->authenticate(['hr']);
-        $in = $this->json_body();
+        $in = $this->api->body();
 
         $data = $this->validated($in);
         $employee = (int) ($in['employee_id'] ?? 0);
@@ -77,7 +78,12 @@ class Salaries extends Base_api
             $this->fail($e->getMessage(), 409);
         }
 
-        $this->notify_employee($employee, 'Salary posted', 'Your salary for ' . $data['period'] . ' is now available.');
+        $this->notify_employee(
+            $employee,
+            'Salary posted',
+            'Your salary for ' . $data['period'] . ' is now available.',
+            '/app/my-salary?period=' . rawurlencode($data['period'])
+        );
         $this->audit('salary_added', 'Salary record #' . $result['id'] . ' for employee #' . $employee . ' (' . $data['period'] . ')');
         $this->ok(['message' => 'Salary record saved.', 'id' => $result['id']], 201);
     }
@@ -93,7 +99,7 @@ class Salaries extends Base_api
         if (!$current) {
             $this->fail('Salary record not found.', 404);
         }
-        $data = $this->validated($this->json_body());
+        $data = $this->validated($this->api->body());
         $clash = $this->row(
             'SELECT id FROM salaries WHERE employee_id = ? AND period = ? AND id <> ?',
             [$current['employee_id'], $data['period'], $id]
@@ -103,7 +109,7 @@ class Salaries extends Base_api
         }
 
         $rules = $this->payroll->current_rules($data['period']);
-        $calculated = $this->payroll->calculate($data, $rules);
+        $calculated = $this->payroll->calculate_for_employee($data, $rules, (int) $current['employee_id']);
         if ($calculated['net_before_loans'] < 0) {
             $this->fail('Payroll deductions cannot exceed gross pay.', 422);
         }
@@ -146,6 +152,8 @@ class Salaries extends Base_api
                 'taxable_benefits' => $data['taxable_benefits'],
                 'non_taxable_benefits' => $data['non_taxable_benefits'],
                 'deductions' => $data['other_deductions'],
+                'absence_days' => $calculated['absence_days'],
+                'absence_deduction' => $calculated['absence_deduction'],
                 'sss' => $calculated['sss'],
                 'philhealth' => $calculated['philhealth'],
                 'pagibig' => $calculated['pagibig'],
@@ -243,8 +251,11 @@ class Salaries extends Base_api
                 $r[$k] = (int) $r[$k];
             }
         }
-        foreach (['basic', 'allowances', 'taxable_benefits', 'non_taxable_benefits', 'deductions', 'sss', 'philhealth', 'pagibig', 'withholding_tax', 'net'] as $k) {
+        foreach (['basic', 'allowances', 'taxable_benefits', 'non_taxable_benefits', 'deductions', 'absence_deduction', 'sss', 'philhealth', 'pagibig', 'withholding_tax', 'net'] as $k) {
             $r[$k] = (float) $r[$k];
+        }
+        if (array_key_exists('absence_days', $r)) {
+            $r['absence_days'] = (int) $r['absence_days'];
         }
         return $r;
     }

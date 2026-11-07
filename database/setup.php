@@ -99,6 +99,11 @@ $schema = file_get_contents(__DIR__ . '/schema.sql');
 foreach (array_filter(array_map('trim', explode(';', $schema))) as $statement) {
     $pdo->exec($statement);
 }
+$pdo->exec(
+    "ALTER TABLE users MODIFY role
+     ENUM('admin','hr','employee','mis','accounting','attendance_operator','viewer')
+     NOT NULL DEFAULT 'employee'"
+);
 
 function add_column_if_missing(PDO $pdo, string $table, string $column, string $definition): void
 {
@@ -113,8 +118,18 @@ function add_column_if_missing(PDO $pdo, string $table, string $column, string $
 }
 
 foreach ([
+    'monthly_salary' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
+] as $column => $definition) {
+    add_column_if_missing($pdo, 'employees', $column, $definition);
+}
+add_column_if_missing($pdo, 'notifications', 'action_url', 'VARCHAR(255) NULL DEFAULT NULL');
+add_column_if_missing($pdo, 'employees', 'qr_token', 'CHAR(64) NULL DEFAULT NULL UNIQUE');
+add_column_if_missing($pdo, 'employees', 'include_in_chart', 'TINYINT(1) NOT NULL DEFAULT 1');
+foreach ([
     'taxable_benefits' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
     'non_taxable_benefits' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
+    'absence_days' => 'SMALLINT UNSIGNED NOT NULL DEFAULT 0',
+    'absence_deduction' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
     'sss' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
     'philhealth' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
     'pagibig' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
@@ -125,8 +140,42 @@ foreach ([
 foreach ([
     'time_in' => 'DATETIME NULL DEFAULT NULL',
     'time_out' => 'DATETIME NULL DEFAULT NULL',
+    'time_in_2' => 'DATETIME NULL DEFAULT NULL',
+    'time_out_2' => 'DATETIME NULL DEFAULT NULL',
 ] as $column => $definition) {
     add_column_if_missing($pdo, 'attendance', $column, $definition);
+}
+
+$employeesWithoutQr = $pdo->query(
+    'SELECT id FROM employees WHERE user_id IS NOT NULL AND qr_token IS NULL'
+)->fetchAll(PDO::FETCH_COLUMN);
+$assignQr = $pdo->prepare('UPDATE employees SET qr_token = ? WHERE id = ? AND qr_token IS NULL');
+foreach ($employeesWithoutQr as $employeeId) {
+    $assignQr->execute([bin2hex(random_bytes(32)), $employeeId]);
+}
+
+$legacySalaries = $pdo->query(
+    "SELECT e.id AS employee_id, s.basic, s.period, s.created_by
+       FROM employees e
+       JOIN salaries s ON s.employee_id = e.id
+       LEFT JOIN employee_salary_history h ON h.employee_id = e.id
+      WHERE e.monthly_salary = 0 AND h.id IS NULL
+        AND s.period = (
+            SELECT MAX(latest.period) FROM salaries latest WHERE latest.employee_id = e.id
+        )"
+)->fetchAll();
+$updateLegacySalary = $pdo->prepare('UPDATE employees SET monthly_salary = ? WHERE id = ?');
+$insertLegacySalary = $pdo->prepare(
+    'INSERT INTO employee_salary_history (employee_id, monthly_salary, effective_from, created_by) VALUES (?, ?, ?, ?)'
+);
+foreach ($legacySalaries as $salary) {
+    $updateLegacySalary->execute([$salary['basic'], $salary['employee_id']]);
+    $insertLegacySalary->execute([
+        $salary['employee_id'],
+        $salary['basic'],
+        $salary['period'] . '-01',
+        $salary['created_by'],
+    ]);
 }
 echo "Database '$name' and tables are ready.\n";
 
@@ -202,6 +251,27 @@ if (!$hasMis) {
     echo "  MIS signs in with a one-time code. Change mis@ormindoro.local to a real email in Accounts.\n";
 } else {
     echo "An MIS account already exists - skipping.\n";
+}
+
+// Dedicated kiosk login; only create it when the requested email is unused.
+$attendanceEmail = 'attendance@system.com';
+$attendanceUsername = 'attendance-panel';
+$attendancePassword = 'attendance12345';
+$attendanceAccount = $pdo->prepare('SELECT id, role, email, username FROM users WHERE email = ? OR username = ?');
+$attendanceAccount->execute([$attendanceEmail, $attendanceUsername]);
+$existingAttendanceAccounts = $attendanceAccount->fetchAll();
+if (!$existingAttendanceAccounts) {
+    make_user($pdo, $attendanceUsername, $attendanceEmail, $attendancePassword, 'attendance_operator');
+    echo "Dedicated attendance panel account created: $attendanceEmail\n";
+} elseif (
+    count($existingAttendanceAccounts) !== 1
+    || $existingAttendanceAccounts[0]['role'] !== 'attendance_operator'
+    || $existingAttendanceAccounts[0]['email'] !== $attendanceEmail
+    || $existingAttendanceAccounts[0]['username'] !== $attendanceUsername
+) {
+    exit("Cannot create the attendance panel account: its email or username is already assigned to another account.\n");
+} else {
+    echo "Dedicated attendance panel account already exists - keeping its current password.\n";
 }
 
 // ---------------------------------------------------------------- demo data

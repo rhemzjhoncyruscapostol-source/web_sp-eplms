@@ -89,6 +89,7 @@ $router->delete('/api/me/leaves/{id}', 'Leaves::cancel')->middleware('auth');
 $router->get('/api/employees', 'Employees::index')->middleware('auth');
 $router->post('/api/employees', 'Employees::store')->middleware('auth');
 $router->put('/api/employees/{id}', 'Employees::update')->middleware('auth');
+$router->get('/api/employees/{id}/salary-history', 'Employees::salary_history')->middleware('auth');
 $router->delete('/api/employees/{id}', 'Employees::destroy')->middleware('auth');
 
 // -----------------------------------------------------------------
@@ -119,8 +120,11 @@ $router->put('/api/loans/{id}', 'Loans::update')->middleware('auth');
 $router->delete('/api/loans/{id}', 'Loans::destroy')->middleware('auth');
 $router->get('/api/me/loans', 'Loans::mine')->middleware('auth');
 $router->get('/api/me/attendance', 'Attendance::mine')->middleware('auth');
+$router->get('/api/me/attendance/qr', 'Attendance::qr')->middleware('auth');
+$router->post('/api/me/attendance/punch', 'Attendance::punch')->middleware('auth');
 $router->post('/api/me/attendance/time-in', 'Attendance::time_in')->middleware('auth');
 $router->post('/api/me/attendance/time-out', 'Attendance::time_out')->middleware('auth');
+$router->post('/api/attendance/scan', 'Attendance::scan')->middleware('auth');
 
 // -----------------------------------------------------------------
 // Budget and expenses (Accounting only)

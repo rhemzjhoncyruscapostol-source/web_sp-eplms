@@ -30,7 +30,7 @@ class Loans extends Base_api
     {
         $this->api->require_method('POST');
         $me = $this->authenticate(['hr']);
-        $input = $this->json_body();
+        $input = $this->api->body();
         $employeeId = (int) ($input['employee_id'] ?? 0);
         $name = $this->text($input['loan_name'] ?? '', 120);
         $principal = $input['principal'] ?? null;
@@ -60,7 +60,7 @@ class Loans extends Base_api
         $this->api->require_method('PUT');
         $this->authenticate(['hr']);
         $id = (int) $id;
-        $input = $this->json_body();
+        $input = $this->api->body();
         $name = $this->text($input['loan_name'] ?? '', 120);
         $installment = $input['installment'] ?? null;
         $current = $this->row('SELECT principal, balance FROM employee_loans WHERE id = ? AND status = "active"', [$id]);

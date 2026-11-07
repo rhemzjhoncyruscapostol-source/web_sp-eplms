@@ -17,7 +17,7 @@ class Auth extends Base_api
         $this->api->require_method('POST');
         $this->api->rate_limit('login_' . $this->ip(), 10, 60);
 
-        $body = $this->json_body();
+        $body = $this->api->body();
         $identifier = $this->text($body['identifier'] ?? '', 255);
         $password = is_string($body['password'] ?? null) ? $body['password'] : '';
         if ($identifier === '' || $password === '') {
@@ -59,7 +59,7 @@ class Auth extends Base_api
         $this->api->require_method('POST');
         $this->api->rate_limit('otp_' . $this->ip(), 20, 60);
 
-        $body = $this->json_body();
+        $body = $this->api->body();
         $challenge = $this->text($body['challenge'] ?? '', 64);
         $code = preg_replace('/\D/', '', (string) ($body['code'] ?? ''));
 
@@ -94,7 +94,7 @@ class Auth extends Base_api
         $this->api->require_method('POST');
         $this->api->rate_limit('otp_resend_' . $this->ip(), 10, 60);
 
-        $challenge = $this->text($this->json_body()['challenge'] ?? '', 64);
+        $challenge = $this->text($this->api->body()['challenge'] ?? '', 64);
         $row = $this->row(
             'SELECT * FROM otp_challenges WHERE challenge_hash = ? AND used = 0 AND expires_at > NOW() LIMIT 1',
             [hash('sha256', $challenge)]
@@ -128,7 +128,7 @@ class Auth extends Base_api
     public function refresh()
     {
         $this->api->require_method('POST');
-        $body = $this->json_body();
+        $body = $this->api->body();
         $refresh = is_string($body['refresh_token'] ?? null) ? $body['refresh_token'] : '';
 
         $payload = $this->api->validate_jwt($refresh);
@@ -157,7 +157,7 @@ class Auth extends Base_api
     public function logout()
     {
         $this->api->require_method('POST');
-        $body = $this->json_body();
+        $body = $this->api->body();
         if (is_string($body['refresh_token'] ?? null) && $body['refresh_token'] !== '') {
             $this->api->revoke_refresh_token($body['refresh_token']);
         }

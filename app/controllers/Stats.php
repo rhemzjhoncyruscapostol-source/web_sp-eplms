@@ -23,7 +23,8 @@ class Stats extends Base_api
             }
             $out['leave'] = $leave;
             $out['on_leave_today'] = (int) $this->scalar(
-                "SELECT COUNT(*) FROM leave_requests WHERE status = 'approved' AND CURDATE() BETWEEN start_date AND end_date"
+                "SELECT COUNT(*) FROM leave_requests WHERE status = 'approved' AND leave_type <> 'travel'
+                  AND CURDATE() BETWEEN start_date AND end_date"
             );
             $out['absent_this_month'] = (int) $this->scalar(
                 "SELECT COUNT(*) FROM attendance WHERE status = 'absent'

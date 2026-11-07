@@ -19,7 +19,9 @@ class Public_api extends Base_api
 
         $rows = $this->rows(
             'SELECT id, full_name, job_title, department, reports_to
-               FROM employees WHERE is_active = 1 ORDER BY full_name'
+               FROM employees
+              WHERE is_active = 1 AND include_in_chart = 1
+           ORDER BY full_name'
         );
         foreach ($rows as &$r) {
             $r['id'] = (int) $r['id'];
@@ -93,7 +95,7 @@ class Public_api extends Base_api
         $months = array_fill(1, 12, 0);
         foreach ($this->rows(
             "SELECT MONTH(start_date) AS m, SUM(days) AS d FROM leave_requests
-              WHERE status = 'approved' AND YEAR(start_date) = YEAR(CURDATE()) GROUP BY m"
+              WHERE status = 'approved' AND leave_type <> 'travel' AND YEAR(start_date) = YEAR(CURDATE()) GROUP BY m"
         ) as $r) {
             $months[(int) $r['m']] = (int) $r['d'];
         }
@@ -103,7 +105,8 @@ class Public_api extends Base_api
             'employees'      => (int) $this->scalar('SELECT COUNT(*) FROM employees WHERE is_active = 1'),
             'offices'        => count($headcount),
             'on_leave_today' => (int) $this->scalar(
-                "SELECT COUNT(*) FROM leave_requests WHERE status = 'approved' AND CURDATE() BETWEEN start_date AND end_date"
+                "SELECT COUNT(*) FROM leave_requests WHERE status = 'approved' AND leave_type <> 'travel'
+                  AND CURDATE() BETWEEN start_date AND end_date"
             ),
             'headcount'      => $headcount,
             'leave_days_by_month' => array_values($months),

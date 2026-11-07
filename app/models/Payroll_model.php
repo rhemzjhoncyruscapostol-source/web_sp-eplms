@@ -22,6 +22,8 @@ class Payroll_model extends Api_model
 
     public function calculate(array $input, array $rules): array
     {
+        $absenceDays = (int) ($input['absence_days'] ?? 0);
+        $absenceDeduction = round(((float) $input['basic'] / 22) * $absenceDays, 2);
         $gross = round($input['basic'] + $input['allowances'] + $input['taxable_benefits'] + $input['non_taxable_benefits'], 2);
         $contributory = $input['basic'] + $input['allowances'] + $input['taxable_benefits'];
         $sssRules = $rules['sss'];
@@ -48,9 +50,13 @@ class Payroll_model extends Api_model
 
         $taxableBase = max(0, $contributory - $sss - $philhealth - $pagibig);
         $tax = $this->withholding_tax($taxableBase, $rules['withholding_tax']);
-        $deductions = round($input['other_deductions'] + $sss + $philhealth + $pagibig + $tax, 2);
+        $deductionsBeforeAbsences = round($input['other_deductions'] + $sss + $philhealth + $pagibig + $tax, 2);
+        $absenceDeduction = min($absenceDeduction, max(0, round($gross - $deductionsBeforeAbsences, 2)));
+        $deductions = round($deductionsBeforeAbsences + $absenceDeduction, 2);
         return [
             'gross' => $gross,
+            'absence_days' => $absenceDays,
+            'absence_deduction' => $absenceDeduction,
             'sss' => $sss,
             'philhealth' => $philhealth,
             'pagibig' => $pagibig,
@@ -60,9 +66,27 @@ class Payroll_model extends Api_model
         ];
     }
 
+    public function calculate_for_employee(array $input, array $rules, int $employeeId): array
+    {
+        $start = new DateTimeImmutable($input['period'] . '-01');
+        $end = $start->modify('+1 month');
+        $input['absence_days'] = (int) $this->scalar(
+            "SELECT COUNT(*) FROM attendance a
+              WHERE a.employee_id = ? AND a.status = 'absent'
+                AND a.work_date >= ? AND a.work_date < ?
+                AND NOT EXISTS (
+                    SELECT 1 FROM leave_requests l
+                     WHERE l.employee_id = a.employee_id AND l.status = 'approved'
+                       AND a.work_date BETWEEN l.start_date AND l.end_date
+                )",
+            [$employeeId, $start->format('Y-m-d'), $end->format('Y-m-d')]
+        );
+        return $this->calculate($input, $rules);
+    }
+
     public function create_salary(array $input, array $rules, int $createdBy): array
     {
-        $calculated = $this->calculate($input, $rules);
+        $calculated = $this->calculate_for_employee($input, $rules, (int) $input['employee_id']);
         if ($calculated['net_before_loans'] < 0) {
             throw new DomainException('Payroll deductions cannot exceed gross pay.');
         }
@@ -81,6 +105,8 @@ class Payroll_model extends Api_model
                 'taxable_benefits' => $input['taxable_benefits'],
                 'non_taxable_benefits' => $input['non_taxable_benefits'],
                 'deductions' => $input['other_deductions'],
+                'absence_days' => $calculated['absence_days'],
+                'absence_deduction' => $calculated['absence_deduction'],
                 'sss' => $calculated['sss'],
                 'philhealth' => $calculated['philhealth'],
                 'pagibig' => $calculated['pagibig'],

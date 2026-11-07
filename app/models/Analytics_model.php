@@ -103,7 +103,7 @@ class Analytics_model extends Api_model
         $leave = array_fill(1, 12, 0);
         foreach ($this->rows(
             "SELECT MONTH(start_date) AS m, SUM(days) AS d FROM leave_requests
-              WHERE status = 'approved' AND YEAR(start_date) = ? GROUP BY m",
+              WHERE status = 'approved' AND leave_type <> 'travel' AND YEAR(start_date) = ? GROUP BY m",
             [$year]
         ) as $r) {
             $leave[(int) $r['m']] = (int) $r['d'];

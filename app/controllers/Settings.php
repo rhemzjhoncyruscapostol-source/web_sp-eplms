@@ -40,7 +40,7 @@ class Settings extends Base_api
     {
         $this->api->require_method('PUT');
         $this->authenticate(['mis']);
-        $in = $this->json_body();
+        $in = $this->api->body();
 
         $c = is_array($in['default_credits'] ?? null) ? $in['default_credits'] : [];
         $clean = [];

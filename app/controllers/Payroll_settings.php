@@ -23,7 +23,7 @@ class Payroll_settings extends Base_api
     {
         $this->api->require_method('POST');
         $me = $this->authenticate(['hr']);
-        $input = $this->json_body();
+        $input = $this->api->body();
         $effectiveFrom = $this->text($input['effective_from'] ?? '', 10);
         $rules = $input['rules'] ?? null;
         if (!$this->valid_date($effectiveFrom) || $effectiveFrom < '2025-01-01') {
@@ -34,7 +34,7 @@ class Payroll_settings extends Base_api
         try {
             $id = $this->schedules->save_schedule($effectiveFrom, $rules, (int) $me['id']);
         } catch (PDOException $e) {
-            if ($e->getCode() === '23000') {
+            if ((string) $e->getCode() === '23000') {
                 $this->fail('A payroll schedule already exists for that effective date.', 409);
             }
             throw $e;

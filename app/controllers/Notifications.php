@@ -11,7 +11,7 @@ class Notifications extends Base_api
         $me = $this->authenticate();
 
         $rows = $this->rows(
-            'SELECT id, title, body, is_read, created_at FROM notifications
+            'SELECT id, title, body, action_url, is_read, created_at FROM notifications
               WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50',
             [$me['id']]
         );

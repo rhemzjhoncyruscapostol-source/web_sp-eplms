@@ -4,7 +4,8 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /**
  * Shared behaviour for every API controller.
  *
- * Active roles (stored in users.role): admin, hr, employee, mis, accounting.
+ * Active roles (stored in users.role): admin, hr, employee, mis, accounting,
+ * attendance_operator.
  * Legacy viewer roles are retired and cannot authenticate.
  */
 class Base_api extends Controller
@@ -22,13 +23,6 @@ class Base_api extends Controller
     }
 
     // ------------------------------------------------------------ request / response
-
-    /** JSON request body as an array (raw - validate it before use). */
-    protected function json_body(): array
-    {
-        $data = json_decode(file_get_contents('php://input'), true);
-        return is_array($data) ? $data : [];
-    }
 
     protected function ok($data = [], int $code = 200)
     {
@@ -169,12 +163,13 @@ class Base_api extends Controller
     }
 
     /** In-app notification, plus email/SMS delivery when those are configured. */
-    protected function notify(int $user_id, string $title, string $body): void
+    protected function notify(int $user_id, string $title, string $body, ?string $action_url = null): void
     {
         $this->insert('notifications', [
             'user_id' => $user_id,
             'title'   => mb_substr($title, 0, 150),
             'body'    => mb_substr($body, 0, 500),
+            'action_url' => $action_url,
         ]);
         $u = $this->row('SELECT email, phone FROM users WHERE id = ?', [$user_id]);
         if ($u) {
@@ -190,11 +185,11 @@ class Base_api extends Controller
         }
     }
 
-    protected function notify_employee(int $employee_id, string $title, string $body): void
+    protected function notify_employee(int $employee_id, string $title, string $body, ?string $action_url = null): void
     {
         $uid = $this->scalar('SELECT user_id FROM employees WHERE id = ?', [$employee_id]);
         if ($uid) {
-            $this->notify((int) $uid, $title, $body);
+            $this->notify((int) $uid, $title, $body, $action_url);
         }
     }
 

@@ -40,7 +40,7 @@ class Public_api_model extends Api_model
     {
         return $this->rows(
             "SELECT MONTH(start_date) AS m, SUM(days) AS d FROM leave_requests
-              WHERE status = 'approved' AND YEAR(start_date) = YEAR(CURDATE()) GROUP BY m"
+              WHERE status = 'approved' AND leave_type <> 'travel' AND YEAR(start_date) = YEAR(CURDATE()) GROUP BY m"
         );
     }
 }

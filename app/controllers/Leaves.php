@@ -4,12 +4,12 @@ require_once __DIR__ . '/Base_api.php';
 
 class Leaves extends Base_api
 {
-    private const TYPES = ['vacation', 'sick', 'special', 'maternity', 'paternity', 'unpaid'];
+    private const TYPES = ['vacation', 'sick', 'special', 'maternity', 'paternity', 'unpaid', 'travel'];
     /** Types that use up leave credits. */
     private const CREDIT_TYPES = ['vacation', 'sick', 'special'];
     private const LABELS = [
         'vacation' => 'Vacation', 'sick' => 'Sick', 'special' => 'Special Privilege',
-        'maternity' => 'Maternity', 'paternity' => 'Paternity', 'unpaid' => 'Unpaid',
+        'maternity' => 'Maternity', 'paternity' => 'Paternity', 'unpaid' => 'Unpaid', 'travel' => 'Travel',
     ];
 
     // ------------------------------------------------------------ employee side
@@ -35,14 +35,14 @@ class Leaves extends Base_api
 
     /**
      * POST /api/me/leaves  (employee)
-     * multipart/form-data or JSON: leave_type, start_date, end_date, reason, attachment (optional file)
+     * multipart/form-data or JSON: leave_type, start_date, end_date, reason, attachment
      */
     public function create()
     {
         $this->api->require_method('POST');
         $me = $this->authenticate(['employee']);
         $emp = $this->my_employee_id();
-        $in = !empty($_POST) ? $_POST : $this->json_body();
+        $in = $this->api->body();
 
         $errors = [];
         $type = $this->text($in['leave_type'] ?? '', 20);
@@ -94,6 +94,9 @@ class Leaves extends Base_api
         }
 
         $file = $this->read_attachment($errors);
+        if ($type === 'travel' && !$file) {
+            $errors['attachment'] = 'Attach proof of travel before submitting this request.';
+        }
         if ($errors) {
             $this->fail('Please fix the highlighted fields.', 422, $errors);
         }
@@ -119,11 +122,11 @@ class Leaves extends Base_api
             'status'      => 'pending',
         ]);
 
-        $this->notify_role(['hr'], 'New leave request', sprintf(
-            '%s filed %s leave for %d day(s): %s to %s.', $me['full_name'] ?: $me['username'], strtolower(self::LABELS[$type]), $days, $start, $end
+        $this->notify_role(['hr'], $type === 'travel' ? 'New travel request' : 'New leave request', sprintf(
+            '%s filed %s for %d workday(s): %s to %s.', $me['full_name'] ?: $me['username'], strtolower(self::LABELS[$type]), $days, $start, $end
         ));
-        $this->audit('leave_filed', "Leave request #$id ($type, $start to $end)");
-        $this->ok(['message' => 'Leave request sent to HR.', 'id' => $id], 201);
+        $this->audit($type === 'travel' ? 'travel_filed' : 'leave_filed', "Request #$id ($type, $start to $end)");
+        $this->ok(['message' => $type === 'travel' ? 'Travel request sent to HR.' : 'Leave request sent to HR.', 'id' => $id], 201);
     }
 
     /** DELETE /api/me/leaves/{id}  (employee) - withdraw a request that is still pending. */
@@ -179,7 +182,7 @@ class Leaves extends Base_api
         $this->api->require_method('PATCH');
         $me = $this->authenticate(['hr', 'mis']);
         $id = (int) $id;
-        $in = $this->json_body();
+        $in = $this->api->body();
 
         $status = $this->text($in['status'] ?? '', 10);
         $remarks = $this->text($in['remarks'] ?? '', 255);
@@ -197,41 +200,67 @@ class Leaves extends Base_api
 
         // Approving a credit-bearing leave takes the days off the employee's balance.
         $charged = 0;
-        if ($status === 'approved' && in_array($leave['leave_type'], self::CREDIT_TYPES, true)) {
-            $col = $leave['leave_type'];
-            $took = $this->run(
-                "UPDATE leave_credits SET $col = $col - ?, updated_at = ? WHERE employee_id = ? AND $col >= ?",
-                [(int) $leave['days'], date('Y-m-d H:i:s'), (int) $leave['employee_id'], (int) $leave['days']]
-            );
-            if (!$took) {
-                $this->fail('This employee does not have enough credits left for this leave. Adjust their credits in Employee Profiles first.', 409);
-            }
-            $charged = 1;
-        }
-
-        $changed = $this->run(
-            "UPDATE leave_requests
-                SET status = ?, review_remarks = ?, reviewed_by = ?, reviewed_at = ?, credits_charged = ?
-              WHERE id = ? AND status = 'pending'",
-            [$status, $remarks !== '' ? $remarks : null, $me['id'], date('Y-m-d H:i:s'), $charged, $id]
-        );
-        if (!$changed) {
-            if ($charged) { // someone else decided first: give the days back
+        $chargeCredits = $status === 'approved' && in_array($leave['leave_type'], self::CREDIT_TYPES, true);
+        $this->data->transaction();
+        try {
+            if ($chargeCredits) {
                 $col = $leave['leave_type'];
-                $this->run("UPDATE leave_credits SET $col = $col + ? WHERE employee_id = ?", [(int) $leave['days'], (int) $leave['employee_id']]);
+                $took = $this->run(
+                    "UPDATE leave_credits SET $col = $col - ?, updated_at = ? WHERE employee_id = ? AND $col >= ?",
+                    [(int) $leave['days'], date('Y-m-d H:i:s'), (int) $leave['employee_id'], (int) $leave['days']]
+                );
+                if (!$took) {
+                    $this->data->roll_back();
+                    $this->fail('This employee does not have enough credits left for this leave. Adjust their credits in Employee Profiles first.', 409);
+                }
+                $charged = 1;
             }
-            $this->fail('This request was already reviewed.', 409);
+
+            $changed = $this->run(
+                "UPDATE leave_requests
+                    SET status = ?, review_remarks = ?, reviewed_by = ?, reviewed_at = ?, credits_charged = ?
+                  WHERE id = ? AND status = 'pending'",
+                [$status, $remarks !== '' ? $remarks : null, $me['id'], date('Y-m-d H:i:s'), $charged, $id]
+            );
+            if (!$changed) {
+                $this->data->roll_back();
+                $this->fail('This request was already reviewed.', 409);
+            }
+
+            if ($status === 'approved' && $leave['leave_type'] === 'travel') {
+                $date = new DateTime($leave['start_date']);
+                $end = new DateTime($leave['end_date']);
+                while ($date <= $end) {
+                    if ((int) $date->format('N') < 6) {
+                        $workDate = $date->format('Y-m-d');
+                        $this->run(
+                            "INSERT INTO attendance (employee_id, work_date, status, remarks, recorded_by)
+                             VALUES (?, ?, 'travel', 'Approved travel request', ?)
+                             ON DUPLICATE KEY UPDATE status = 'travel', remarks = VALUES(remarks), recorded_by = VALUES(recorded_by)",
+                            [(int) $leave['employee_id'], $workDate, (int) $me['id']]
+                        );
+                    }
+                    $date->modify('+1 day');
+                }
+            }
+            $this->data->commit();
+        } catch (Throwable $e) {
+            $this->data->roll_back();
+            throw $e;
         }
 
         $label = self::LABELS[$leave['leave_type']];
-        $this->notify_employee((int) $leave['employee_id'], "Leave $status", sprintf(
-            'Your %s leave (%s to %s) was %s.%s', strtolower($label), $leave['start_date'], $leave['end_date'], $status, $remarks !== '' ? " Remarks: $remarks" : ''
-        ));
+        $isTravel = $leave['leave_type'] === 'travel';
+        $this->notify_employee((int) $leave['employee_id'], $isTravel ? "Travel request $status" : "Leave $status", sprintf(
+            'Your %s (%s to %s) was %s.%s', strtolower($label), $leave['start_date'], $leave['end_date'], $status, $remarks !== '' ? " Remarks: $remarks" : ''
+        ), '/app/my-leaves?focusLeave=' . $id);
         if ($charged) {
-            $this->notify_employee((int) $leave['employee_id'], 'Credits updated', sprintf('%d day(s) were deducted from your %s leave credits.', (int) $leave['days'], strtolower($label)));
+            $this->notify_employee((int) $leave['employee_id'], 'Credits updated', sprintf('%d day(s) were deducted from your %s leave credits.', (int) $leave['days'], strtolower($label)), '/app/my-profile');
         }
-        $this->audit('leave_' . $status, "Leave request #$id $status");
-        $this->ok(['message' => $status === 'approved' ? 'Leave approved.' : 'Leave rejected.']);
+        $this->audit(($isTravel ? 'travel_' : 'leave_') . $status, "Request #$id $status");
+        $this->ok(['message' => $isTravel
+            ? ($status === 'approved' ? 'Travel approved and recorded in attendance.' : 'Travel request rejected.')
+            : ($status === 'approved' ? 'Leave approved.' : 'Leave rejected.')]);
     }
 
     /** GET /api/leaves/{id}/attachment - the owner, HR, MIS or Admin only. */

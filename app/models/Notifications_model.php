@@ -7,7 +7,7 @@ class Notifications_model extends Api_model
     public function for_user(int $user_id): array
     {
         return $this->rows(
-            'SELECT id, title, body, is_read, created_at FROM notifications
+            'SELECT id, title, body, action_url, is_read, created_at FROM notifications
               WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50',
             [$user_id]
         );

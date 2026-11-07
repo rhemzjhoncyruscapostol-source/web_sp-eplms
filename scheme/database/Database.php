@@ -440,7 +440,7 @@ class Database {
                 return $stmt->rowCount();
             }
         } catch (Exception $e) {
-            throw new PDOException($e->getMessage() . 'Query: ' . $this->get_sql . '');
+            throw new PDOException($e->getMessage() . 'Query: ' . $this->get_sql . '', (int) $e->getCode(), $e);
         }
     }
 

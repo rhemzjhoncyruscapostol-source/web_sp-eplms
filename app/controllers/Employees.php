@@ -8,17 +8,18 @@ class Employees extends Base_api
     public function index()
     {
         $this->api->require_method('GET');
-        $this->authenticate(['admin', 'hr', 'mis', 'accounting']);
+        $me = $this->authenticate(['admin', 'hr', 'mis', 'accounting']);
+        $salaryColumn = in_array($me['role'], ['hr', 'mis'], true) ? 'e.monthly_salary' : 'NULL AS monthly_salary';
 
         $rows = $this->rows(
-            'SELECT e.id, e.user_id, e.employee_no, e.full_name, e.job_title, e.department, e.reports_to,
-                    e.date_hired, e.is_active, b.full_name AS reports_to_name, u.username,
+            "SELECT e.id, e.user_id, e.employee_no, e.full_name, e.job_title, e.department, $salaryColumn, e.reports_to,
+                    e.date_hired, e.is_active, e.include_in_chart, b.full_name AS reports_to_name, u.username,
                     c.vacation, c.sick, c.special
                FROM employees e
           LEFT JOIN employees b ON b.id = e.reports_to
           LEFT JOIN users u ON u.id = e.user_id
           LEFT JOIN leave_credits c ON c.employee_id = e.id
-           ORDER BY e.full_name'
+           ORDER BY e.full_name"
         );
         $this->ok(['employees' => array_map([$this, 'shape'], $rows)]);
     }
@@ -27,13 +28,30 @@ class Employees extends Base_api
     public function store()
     {
         $this->api->require_method('POST');
-        $this->authenticate(['hr', 'mis']);
+        $me = $this->authenticate(['hr', 'mis']);
 
-        [$data, $credits] = $this->validated($this->json_body(), null);
-        $id = $this->insert('employees', $data);
-        $this->give_default_credits($id);
-        if ($credits) {
-            $this->save_credits($id, $credits);
+        [$data, $credits] = $this->validated($this->api->body(), null);
+        $salaryEffectiveFrom = $data['salary_effective_from'];
+        unset($data['salary_effective_from']);
+        $this->data->db->transaction();
+        try {
+            $id = $this->insert('employees', $data);
+            if ((float) $data['monthly_salary'] > 0) {
+                $this->insert('employee_salary_history', [
+                    'employee_id' => $id,
+                    'monthly_salary' => $data['monthly_salary'],
+                    'effective_from' => $salaryEffectiveFrom,
+                    'created_by' => (int) $me['id'],
+                ]);
+            }
+            $this->give_default_credits($id);
+            if ($credits) {
+                $this->save_credits($id, $credits);
+            }
+            $this->data->db->commit();
+        } catch (Throwable $e) {
+            $this->data->db->roll_back();
+            throw $e;
         }
         $this->audit('employee_added', 'Added employee ' . $data['full_name'] . " (#$id)");
         $this->ok(['message' => 'Employee added.', 'id' => $id], 201);
@@ -43,25 +61,65 @@ class Employees extends Base_api
     public function update($id)
     {
         $this->api->require_method('PUT');
-        $this->authenticate(['hr', 'mis']);
+        $me = $this->authenticate(['hr', 'mis']);
         $id = (int) $id;
-        $this->find($id);
+        $current = $this->find($id);
 
-        [$data, $credits] = $this->validated($this->json_body(), $id);
+        [$data, $credits] = $this->validated($this->api->body(), $id);
         $data['updated_at'] = date('Y-m-d H:i:s');
 
-        $sets = implode(', ', array_map(function ($c) { return "$c = ?"; }, array_keys($data)));
-        $this->run("UPDATE employees SET $sets WHERE id = ?", array_merge(array_values($data), [$id]));
+        $salaryChanged = (float) $current['monthly_salary'] !== (float) $data['monthly_salary'];
+        $this->data->db->transaction();
+        try {
+            $salaryEffectiveFrom = $data['salary_effective_from'];
+            unset($data['salary_effective_from']);
+            $sets = implode(', ', array_map(function ($c) { return "$c = ?"; }, array_keys($data)));
+            $this->run("UPDATE employees SET $sets WHERE id = ?", array_merge(array_values($data), [$id]));
+            if ($salaryChanged) {
+                $this->insert('employee_salary_history', [
+                    'employee_id' => $id,
+                    'monthly_salary' => $data['monthly_salary'],
+                    'effective_from' => $salaryEffectiveFrom,
+                    'created_by' => (int) $me['id'],
+                ]);
+            }
+            if ($credits) {
+                $this->give_default_credits($id);
+                $this->save_credits($id, $credits);
+            }
+            $this->data->db->commit();
+        } catch (Throwable $e) {
+            $this->data->db->roll_back();
+            throw $e;
+        }
         if ($credits) {
-            $this->give_default_credits($id);
-            $this->save_credits($id, $credits);
             $this->notify_employee($id, 'Credits updated', sprintf(
                 'Your leave credits are now: vacation %s, sick %s, special privilege %s.',
                 $credits['vacation'], $credits['sick'], $credits['special']
-            ));
+            ), '/app/my-profile');
         }
         $this->audit('employee_updated', 'Updated employee ' . $data['full_name'] . " (#$id)");
         $this->ok(['message' => 'Employee updated.']);
+    }
+
+    public function salary_history($id)
+    {
+        $this->api->require_method('GET');
+        $this->authenticate(['hr', 'mis']);
+        $id = (int) $id;
+        $this->find($id);
+        $history = $this->rows(
+            'SELECT monthly_salary, effective_from, created_at
+               FROM employee_salary_history
+              WHERE employee_id = ?
+           ORDER BY effective_from DESC, id DESC',
+            [$id]
+        );
+        foreach ($history as &$row) {
+            $row['monthly_salary'] = (float) $row['monthly_salary'];
+        }
+        unset($row);
+        $this->ok(['salary_history' => $history]);
     }
 
     /** DELETE /api/employees/{id}  (mis) - only when there is no payroll, leave or expense history. */
@@ -126,6 +184,35 @@ class Employees extends Base_api
             $errors['date_hired'] = 'Use a valid date (YYYY-MM-DD).';
         }
 
+        $rawSalary = $in['monthly_salary'] ?? ($self_id !== null ? $this->scalar('SELECT monthly_salary FROM employees WHERE id = ?', [$self_id]) : 0);
+        if ($rawSalary === null || $rawSalary === '' || !is_numeric($rawSalary) || $rawSalary < 0 || $rawSalary > 9999999999.99) {
+            $errors['monthly_salary'] = 'Monthly salary must be a number of 0 or more.';
+            $monthlySalary = 0;
+        } else {
+            $monthlySalary = round((float) $rawSalary, 2);
+        }
+        $salaryEffectiveFrom = $this->text(
+            $in['salary_effective_from'] ?? ($self_id === null ? date('Y-m-d') : ''),
+            10
+        );
+        if ($salaryEffectiveFrom !== '' && !$this->valid_date($salaryEffectiveFrom)) {
+            $errors['salary_effective_from'] = 'Use a valid effective date (YYYY-MM-DD).';
+        } elseif ($salaryEffectiveFrom === '') {
+            $salaryEffectiveFrom = date('Y-m-d');
+        }
+        if ($self_id !== null && isset($monthlySalary)) {
+            $currentSalary = (float) $this->scalar('SELECT monthly_salary FROM employees WHERE id = ?', [$self_id]);
+            if ($currentSalary !== $monthlySalary) {
+                $latestEffectiveDate = $this->scalar(
+                    'SELECT MAX(effective_from) FROM employee_salary_history WHERE employee_id = ?',
+                    [$self_id]
+                );
+                if ($latestEffectiveDate && $salaryEffectiveFrom < $latestEffectiveDate) {
+                    $errors['salary_effective_from'] = 'A salary change cannot be backdated before the most recent salary history entry.';
+                }
+            }
+        }
+
         $boss = $in['reports_to'] ?? null;
         $boss = ($boss === null || $boss === '') ? null : (int) $boss;
         if ($boss !== null) {
@@ -158,9 +245,14 @@ class Employees extends Base_api
             'full_name'   => $name,
             'job_title'   => $title,
             'department'  => $dept,
+            'monthly_salary' => $monthlySalary,
+            'salary_effective_from' => $salaryEffectiveFrom,
             'reports_to'  => $boss,
             'date_hired'  => $hired !== '' ? $hired : null,
             'is_active'   => (!empty($in['is_active']) || !array_key_exists('is_active', $in)) ? 1 : 0,
+            'include_in_chart' => array_key_exists('include_in_chart', $in)
+                ? (!empty($in['include_in_chart']) ? 1 : 0)
+                : ($self_id !== null ? (int) $this->scalar('SELECT include_in_chart FROM employees WHERE id = ?', [$self_id]) : 0),
         ], $credits];
     }
 
@@ -186,9 +278,13 @@ class Employees extends Base_api
             $r[$k] = $r[$k] !== null ? (int) $r[$k] : null;
         }
         $r['is_active'] = (int) $r['is_active'];
+        $r['include_in_chart'] = (int) $r['include_in_chart'];
         foreach (['vacation', 'sick', 'special'] as $k) {
             $r[$k] = $r[$k] !== null ? (float) $r[$k] : null;
         }
+        $r['monthly_salary'] = isset($r['monthly_salary']) && $r['monthly_salary'] !== null
+            ? (float) $r['monthly_salary']
+            : null;
         return $r;
     }
 }

@@ -35,4 +35,19 @@ class Api_model extends Model
     {
         return (int) $this->db->table($table)->insert($fields);
     }
+
+    public function transaction(): void
+    {
+        $this->db->transaction();
+    }
+
+    public function commit(): void
+    {
+        $this->db->commit();
+    }
+
+    public function roll_back(): void
+    {
+        $this->db->roll_back();
+    }
 }
