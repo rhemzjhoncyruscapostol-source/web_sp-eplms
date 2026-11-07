@@ -13,7 +13,7 @@ class Attendance extends Base_api
         $this->attendance = $this->call->model('Attendance_model', 'attendance');
     }
 
-    /** GET /api/attendance?date=YYYY-MM-DD  (hr, mis, admin) - every active employee with their status that day. */
+    /** GET /api/attendance?date=YYYY-MM-DD   (hr, mis, admin) - every active employee with their status that day. */
     public function index()
     {
         $this->api->require_method('GET');
