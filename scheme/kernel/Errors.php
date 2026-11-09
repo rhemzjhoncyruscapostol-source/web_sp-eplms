@@ -136,6 +136,33 @@ class Errors
 	 */
 	public function show_database_error($message, $sql = '', $bindings = [], $exception = null, $template = 'error_db')
 	{
+		$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+		$isApiRequest = is_string($requestPath) && (
+			$requestPath === '/api' || strpos($requestPath, '/api/') === 0
+		);
+
+		if ($isApiRequest && strtolower((string) config_item('environment')) !== 'development') {
+			$details = $exception instanceof Throwable
+				? sprintf(
+					'%s: %s in %s:%d',
+					get_class($exception),
+					$exception->getMessage(),
+					$exception->getFile(),
+					$exception->getLine()
+				)
+				: (string) $message;
+			error_log('Unhandled API database error: ' . $details);
+
+			while (ob_get_level() > 0) {
+				ob_end_clean();
+			}
+
+			http_response_code(500);
+			header('Content-Type: application/json; charset=UTF-8');
+			echo json_encode(['error' => 'Internal server error', 'status' => 500]);
+			exit;
+		}
+
 		$template_path = config_item('error_view_path');
 		if (empty($template_path)) {
 			$template_path = APP_DIR . 'views/errors/';
