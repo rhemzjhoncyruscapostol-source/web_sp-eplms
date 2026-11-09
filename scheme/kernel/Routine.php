@@ -186,13 +186,35 @@ if ( ! function_exists('_exception_handler'))
 	 */
 	function _exception_handler($e)
 	{
-		if(config_item('log_threshold') == 1 || config_item('log_threshold') == 3)
-		{
+		$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+		$isApiRequest = is_string($requestPath) && (
+			$requestPath === '/api' || strpos($requestPath, '/api/') === 0
+		);
+
+		if ($isApiRequest && strtolower((string) config_item('environment')) !== 'development') {
+			error_log(sprintf(
+				'Unhandled API exception: %s: %s in %s:%d',
+				get_class($e),
+				$e->getMessage(),
+				$e->getFile(),
+				$e->getLine()
+			));
+
+			while (ob_get_level() > 0) {
+				ob_end_clean();
+			}
+
+			http_response_code(500);
+			header('Content-Type: application/json; charset=UTF-8');
+			echo json_encode(['error' => 'Internal server error', 'status' => 500]);
+			return;
+		}
+
+		if (config_item('log_threshold') == 1 || config_item('log_threshold') == 3) {
 			$logger = load_class('logger', 'kernel');
 			$logger->log('error', get_class($e), $e->getMessage(), $e->getFile(), $e->getLine());
 		}
-		if(strtolower(config_item('environment') == 'development'))
-		{
+		if (strtolower((string) config_item('environment')) === 'development') {
 			$exception = load_class('Errors', 'kernel');
 			$exception->show_exception($e);
 		}
