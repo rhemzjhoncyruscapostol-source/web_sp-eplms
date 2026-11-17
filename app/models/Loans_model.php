@@ -10,7 +10,7 @@ class Loans_model extends Api_model
             'SELECT l.id, l.employee_id, l.loan_name, l.principal, l.installment, l.balance,
                     l.status, l.remarks, e.full_name, e.employee_no
                FROM employee_loans l JOIN employees e ON e.id = l.employee_id
-              ORDER BY l.status = "active" DESC, e.full_name, l.created_at DESC'
+              ORDER BY l.status = \'active\' DESC, e.full_name, l.created_at DESC'
         );
     }
 
@@ -35,7 +35,7 @@ class Loans_model extends Api_model
     public function update_terms(int $id, string $name, float $installment, ?string $remarks): int
     {
         return $this->run(
-            'UPDATE employee_loans SET loan_name = ?, installment = ?, remarks = ?, updated_at = ? WHERE id = ? AND status = "active"',
+            'UPDATE employee_loans SET loan_name = ?, installment = ?, remarks = ?, updated_at = ? WHERE id = ? AND status = \'active\'',
             [$name, $installment, $remarks, date('Y-m-d H:i:s'), $id]
         );
     }
@@ -43,7 +43,7 @@ class Loans_model extends Api_model
     public function cancel(int $id): int
     {
         return $this->run(
-            'UPDATE employee_loans SET status = "cancelled", updated_at = ? WHERE id = ? AND status = "active"',
+            'UPDATE employee_loans SET status = \'cancelled\', updated_at = ? WHERE id = ? AND status = \'active\'',
             [date('Y-m-d H:i:s'), $id]
         );
     }
