@@ -50,7 +50,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
     get_config($config);
 })();
 
-// -----------------------------------------------------------------
+// -----------------------------------------------------------------  
 // Public (no login): names, positions, offices and totals only
 // -----------------------------------------------------------------
 $router->get('/', 'Public_api::index');
