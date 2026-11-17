@@ -317,6 +317,7 @@ class Base_api extends Controller
             }
         }
 
+        $smsSent = false;
         $hook = getenv('SMS_WEBHOOK_URL');
         if ($hook && $phone) {
             $ctx = stream_context_create(['http' => [
@@ -324,10 +325,21 @@ class Base_api extends Controller
                 'header'  => "Content-Type: application/json\r\n",
                 'content' => json_encode(['to' => $phone, 'message' => $title . ': ' . $body]),
                 'timeout' => 4,
+                'ignore_errors' => true,
             ]]);
-            @file_get_contents($hook, false, $ctx);
+            $http_response_header = [];
+            $response = @file_get_contents($hook, false, $ctx);
+            $statusLines = [];
+            preg_match_all('/^HTTP\/\S+\s+(\d{3})\b/m', implode("\n", $http_response_header), $statusLines);
+            $statusCodes = $statusLines[1] ?? [];
+            $status = $statusCodes ? end($statusCodes) : null;
+            if ($response !== false && $status !== null && (int) $status >= 200 && (int) $status < 300) {
+                $smsSent = true;
+            } else {
+                error_log('SMS webhook delivery failed with HTTP ' . ($status ?? 'request error') . '.');
+            }
         }
-        return $emailSent;
+        return $emailSent || $smsSent;
     }
 
     private function sendWithGmailApi(
