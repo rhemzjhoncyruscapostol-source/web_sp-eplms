@@ -12,7 +12,7 @@ class Employees extends Base_api
         $salaryColumn = in_array($me['role'], ['hr', 'mis'], true) ? 'e.monthly_salary' : 'NULL AS monthly_salary';
 
         $rows = $this->rows(
-            "SELECT e.id, e.user_id, e.employee_no, e.full_name, e.job_title, e.department, $salaryColumn, e.reports_to,
+            "SELECT e.id, e.user_id, e.employee_no, e.full_name, e.photo_url, e.job_title, e.department, $salaryColumn, e.reports_to,
                     e.date_hired, e.is_active, e.include_in_chart, b.full_name AS reports_to_name, u.username,
                     c.vacation, c.sick, c.special
                FROM employees e
@@ -171,6 +171,31 @@ class Employees extends Base_api
         $title = $this->text($in['job_title'] ?? '', 120);
         $dept = $this->text($in['department'] ?? '', 120);
         $no = $this->text($in['employee_no'] ?? '', 30);
+        $photo = array_key_exists('photo_url', $in)
+            ? $in['photo_url']
+            : ($self_id !== null ? $this->scalar('SELECT photo_url FROM employees WHERE id = ?', [$self_id]) : null);
+        if ($photo !== null && $photo !== '') {
+            if (!is_string($photo) || strlen($photo) > 140000 || !preg_match('/^data:image\/jpeg;base64,([A-Za-z0-9+\/]+={0,2})$/', $photo, $matches)) {
+                $errors['photo_url'] = 'Choose a valid JPEG photo no larger than 100 KB after resizing.';
+            } else {
+                $imageBytes = base64_decode($matches[1], true);
+                $imageInfo = $imageBytes !== false ? @getimagesizefromstring($imageBytes) : false;
+                if (
+                    $imageBytes === false
+                    || strlen($imageBytes) > 102400
+                    || !$imageInfo
+                    || $imageInfo['mime'] !== 'image/jpeg'
+                    || $imageInfo[0] > 420
+                    || $imageInfo[1] > 420
+                ) {
+                    $errors['photo_url'] = 'Choose a valid JPEG photo no larger than 100 KB after resizing.';
+                } else {
+                    $photo = 'data:image/jpeg;base64,' . base64_encode($imageBytes);
+                }
+            }
+        } elseif ($photo === '') {
+            $photo = null;
+        }
         if ($name === '') $errors['full_name'] = 'Full name is required.';
         if ($title === '') $errors['job_title'] = 'Job title is required.';
         if ($dept === '') $errors['department'] = 'Choose or type the office.';
@@ -243,6 +268,7 @@ class Employees extends Base_api
         return [[
             'employee_no' => $no !== '' ? $no : null,
             'full_name'   => $name,
+            'photo_url'   => $photo,
             'job_title'   => $title,
             'department'  => $dept,
             'monthly_salary' => $monthlySalary,

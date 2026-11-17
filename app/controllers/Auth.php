@@ -249,7 +249,7 @@ class Auth extends Base_api
     {
         $p = $this->row(
             'SELECT u.id, u.username, u.email, u.phone, u.role,
-                    e.id AS employee_id, e.employee_no, e.full_name, e.job_title, e.department, e.date_hired,
+                    e.id AS employee_id, e.employee_no, e.full_name, e.photo_url, e.job_title, e.department, e.date_hired,
                     c.vacation, c.sick, c.special
                FROM users u
           LEFT JOIN employees e ON e.user_id = u.id

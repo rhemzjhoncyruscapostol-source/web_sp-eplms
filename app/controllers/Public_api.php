@@ -2,7 +2,7 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 require_once __DIR__ . '/Base_api.php';
 
-/** Endpoints that need no login. They only ever expose names, positions, offices and totals. */
+/** Endpoints that need no login. They expose public directory and chart fields. */
 class Public_api extends Base_api
 {
     /** GET / */
@@ -11,14 +11,14 @@ class Public_api extends Base_api
         $this->ok(['name' => 'Sangguniang Panlalawigan Employee Leave Management System API', 'status' => 'ok']);
     }
 
-    /** GET /api/org-chart - names and positions only. */
+    /** GET /api/org-chart - public organization chart fields. */
     public function org_chart()
     {
         $this->api->require_method('GET');
         $this->throttle();
 
         $rows = $this->rows(
-            'SELECT id, full_name, job_title, department, reports_to
+            'SELECT id, full_name, photo_url, job_title, department, reports_to
                FROM employees
               WHERE is_active = 1 AND include_in_chart = 1
            ORDER BY full_name'
@@ -57,7 +57,7 @@ class Public_api extends Base_api
         $total = (int) $this->scalar("SELECT COUNT(*) FROM employees WHERE $clause", $params);
         $offset = ($page - 1) * $per;
         $rows = $this->rows(
-            "SELECT id, full_name, job_title, department FROM employees
+            "SELECT id, full_name, photo_url, job_title, department FROM employees
               WHERE $clause ORDER BY full_name LIMIT $per OFFSET $offset",
             $params
         );

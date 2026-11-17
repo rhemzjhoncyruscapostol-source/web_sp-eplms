@@ -125,6 +125,7 @@ foreach ([
 add_column_if_missing($pdo, 'notifications', 'action_url', 'VARCHAR(255) NULL DEFAULT NULL');
 add_column_if_missing($pdo, 'employees', 'qr_token', 'CHAR(64) NULL DEFAULT NULL UNIQUE');
 add_column_if_missing($pdo, 'employees', 'include_in_chart', 'TINYINT(1) NOT NULL DEFAULT 1');
+add_column_if_missing($pdo, 'employees', 'photo_url', 'MEDIUMTEXT NULL DEFAULT NULL');
 foreach ([
     'taxable_benefits' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
     'non_taxable_benefits' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
